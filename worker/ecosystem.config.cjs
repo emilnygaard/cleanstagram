@@ -2,8 +2,8 @@ module.exports = {
   apps: [
     {
       name: "cleanstagram",
-      script: "src/server.ts",
-      interpreter: "tsx",
+      script: "node_modules/.bin/tsx",
+      args: "src/server.ts",
       watch: false,
       autorestart: true,
       restart_delay: 3000,
