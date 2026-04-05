@@ -1,0 +1,18 @@
+{
+  "name": "Cleanstagram",
+  "short_name": "Cleanstagram",
+  "description": "Instagram without the noise — clean feed, no ads, no suggested posts",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f9fafb",
+  "theme_color": "#111827",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

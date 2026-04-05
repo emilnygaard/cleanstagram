@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f0f0f"/>
+      <stop offset="100%" stop-color="#1a1a1a"/>
+    </linearGradient>
+  </defs>
+  <!-- Background -->
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <!-- Camera body -->
+  <rect x="88" y="164" width="336" height="240" rx="32" fill="none" stroke="white" stroke-width="26"/>
+  <!-- Viewfinder bump -->
+  <path d="M186 164 L186 134 Q186 118 202 118 L256 118 Q272 118 272 134 L272 164" fill="none" stroke="white" stroke-width="26" stroke-linejoin="round"/>
+  <!-- Lens ring -->
+  <circle cx="256" cy="284" r="88" fill="none" stroke="white" stroke-width="26"/>
+  <!-- Lens inner -->
+  <circle cx="256" cy="284" r="44" fill="white"/>
+  <!-- Flash dot -->
+  <circle cx="380" cy="220" r="20" fill="white"/>
+</svg>

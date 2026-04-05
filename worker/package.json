@@ -1,0 +1,23 @@
+{
+  "name": "cleanstagram-worker",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "start": "tsx src/server.ts",
+    "build:node": "tsc -p tsconfig.node.json",
+    "start:prod": "node dist/server.js"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.19.12",
+    "@noble/curves": "^2.0.1",
+    "hono": "^4.0.0",
+    "tsx": "^4.21.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.0.0",
+    "typescript": "^5.0.0",
+    "wrangler": "^3.0.0"
+  }
+}

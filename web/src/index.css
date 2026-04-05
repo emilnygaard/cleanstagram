@@ -1,0 +1,40 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  background: #f9fafb;
+  -webkit-font-smoothing: antialiased;
+  /* Smooth scrolling on iOS */
+  -webkit-overflow-scrolling: touch;
+  /* Prevent pull-to-refresh in Chrome Android (we implement our own) */
+  overscroll-behavior-y: contain;
+}
+
+/* Hide scrollbars for story row */
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Safe area insets for notch/home indicator */
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.safe-top {
+  padding-top: env(safe-area-inset-top);
+}
+
+/* Tap highlight suppression */
+button, a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Video fills container on all browsers */
+video {
+  display: block;
+}

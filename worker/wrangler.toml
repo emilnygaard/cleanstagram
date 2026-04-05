@@ -1,0 +1,17 @@
+name = "cleanstagram-worker"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+[dev]
+port = 8787
+
+# ---------------------------------------------------------------------------
+# Deployment
+# ---------------------------------------------------------------------------
+# Deploy with: cd worker && npm run deploy
+# Then note the URL: https://cleanstagram-worker.<your-subdomain>.workers.dev
+#
+# Build the frontend with that URL:
+#   cd web && VITE_API_URL=https://cleanstagram-worker.<sub>.workers.dev npm run build
+# Deploy web/dist to Cloudflare Pages.
