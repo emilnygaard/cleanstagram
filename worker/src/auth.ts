@@ -59,6 +59,22 @@ export async function getLoginPage(
   const safeReturn = returnTo.replace(/['"<>]/g, "");
   const inject = `<script>
 (function() {
+  // Intercept fetch calls to Instagram's consent/cookie API endpoints.
+  // These calls fail with CORS errors because the page is served from our
+  // Pi's origin instead of instagram.com. Faking a success response lets
+  // the cookie consent dialog dismiss itself normally.
+  var _fetch = window.fetch;
+  window.fetch = function(input, init) {
+    var url = typeof input === 'string' ? input : (input instanceof Request ? input.url : String(input));
+    if (url.includes('/consent') || url.includes('/cookie') || url.includes('cookieless')) {
+      return Promise.resolve(new Response('{"status":"ok"}', {
+        status: 200,
+        headers: {'Content-Type': 'application/json'}
+      }));
+    }
+    return _fetch.apply(this, arguments);
+  };
+
   document.addEventListener('DOMContentLoaded', function() {
     document.querySelectorAll('form').forEach(function(form) {
       form.addEventListener('submit', function(e) {
