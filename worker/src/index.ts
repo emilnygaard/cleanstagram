@@ -15,7 +15,7 @@ app.use(
   cors({
     origin: "*",
     allowMethods: ["GET", "POST", "OPTIONS"],
-    allowHeaders: ["Content-Type", "X-Session-Id", "X-CSRF-Token", "X-CSRF-Token-Hint", "X-DS-User-Id"],
+    allowHeaders: ["Content-Type", "X-Session-Id", "X-CSRF-Token", "X-CSRF-Token-Hint", "X-DS-User-Id", "X-Browser-UA"],
     maxAge: 86400, // cache preflight for 24h — eliminates the OPTIONS round-trip on every request
   })
 );
@@ -41,8 +41,12 @@ app.post("/api/auth/login", async (c) => {
   const { username, password } = await c.req.json<{ username: string; password: string }>();
   if (!username || !password) return c.json({ error: "Missing username or password" }, 400);
 
-  const result = await directLogin(username, password);
+  // Forward the browser's real UA so Instagram doesn't treat this as an unknown device
+  const ua = c.req.header("X-Browser-UA") ?? c.req.header("User-Agent") ?? "";
+  const result = await directLogin(username, password, ua);
+
   if (result.status === "error") return c.json({ error: result.error }, 401);
+  if (result.status === "checkpoint") return c.json({ error: "checkpoint_required" }, 401);
   return c.json(result);
 });
 

@@ -193,33 +193,41 @@ export async function submitLogin(
 // ---------------------------------------------------------------------------
 // POST /api/auth/login
 // The Pi submits the login directly to Instagram from its residential IP.
-// No browser proxying required — just username + password JSON.
+// We forward the browser's real User-Agent so Instagram doesn't flag it as a
+// new/unknown device, and we capture all initial cookies (including `mid`,
+// the device identifier) so the session looks like a real browser session.
 // ---------------------------------------------------------------------------
 export async function directLogin(
   username: string,
-  password: string
+  password: string,
+  userAgent: string
 ): Promise<
   | { status: "ok"; sessionId: string; csrfToken: string; dsUserId: string }
   | { status: "2fa_required"; twoFactorIdentifier: string; csrfToken: string; username: string }
+  | { status: "checkpoint" }
   | { status: "error"; error: string }
 > {
-  const UA =
-    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1";
-
-  // Step 1 — Fetch the login page to get a fresh csrftoken cookie
+  // Step 1 — Fetch the login page with the real browser UA.
+  // This gives us the csrftoken AND the `mid` device-ID cookie that Instagram
+  // plants on first visit. Including `mid` in the login request makes the
+  // session look like it came from a real browser rather than a headless client.
   const pageRes = await fetch(`${IG_BASE}/accounts/login/`, {
     headers: {
-      "User-Agent": UA,
+      "User-Agent": userAgent,
       Accept: "text/html,application/xhtml+xml,*/*",
       "Accept-Language": "en-US,en;q=0.9",
     },
     redirect: "follow",
   });
-  const pageCookies = pageRes.headers.get("set-cookie") ?? "";
-  const csrfToken = parseCsrfToken(pageCookies, "csrftoken") ?? "";
 
-  // Step 2 — Submit credentials to Instagram's AJAX login endpoint
-  // enc_password format ":0:{timestamp}:{plain}" means "version 0 = no encryption"
+  // Collect ALL cookies set by the page (csrftoken, mid, ig_did, …)
+  const pageCookieHeader = pageRes.headers.get("set-cookie") ?? "";
+  const initialCookies = parseCookieMap(pageCookieHeader);
+  const csrfToken = initialCookies.get("csrftoken") ?? "";
+  const cookieStr = [...initialCookies.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
+
+  // Step 2 — Submit credentials to Instagram's AJAX login endpoint.
+  // enc_password version 0 = plain-text password (no RSA/AES needed).
   const encPassword = `#PWD_INSTAGRAM_BROWSER:0:${Math.floor(Date.now() / 1000)}:${password}`;
   const body = new URLSearchParams({
     username,
@@ -231,14 +239,14 @@ export async function directLogin(
   const loginRes = await fetch(`${IG_BASE}/accounts/login/ajax/`, {
     method: "POST",
     headers: {
-      "User-Agent": UA,
+      "User-Agent": userAgent,
       "Content-Type": "application/x-www-form-urlencoded",
       "X-CSRFToken": csrfToken,
       "X-Requested-With": "XMLHttpRequest",
       "X-IG-App-ID": "936619743392459",
       Referer: `${IG_BASE}/accounts/login/`,
       Origin: IG_BASE,
-      Cookie: `csrftoken=${csrfToken}`,
+      Cookie: cookieStr,           // include mid + all initial cookies
     },
     body: body.toString(),
     redirect: "manual",
@@ -254,6 +262,12 @@ export async function directLogin(
     data = (await loginRes.json()) as Record<string, unknown>;
   } catch {
     return { status: "error", error: "Unexpected response from Instagram" };
+  }
+
+  // Instagram sometimes requires email/SMS verification after a new-device login.
+  // The session is created but won't work until the checkpoint is cleared.
+  if (data.checkpoint_url || (data.message === "checkpoint_required")) {
+    return { status: "checkpoint" };
   }
 
   if (data.two_factor_required) {
@@ -280,6 +294,23 @@ export async function directLogin(
     csrfToken: parseCsrfToken(setCookie, "csrftoken") ?? csrfToken,
     dsUserId: parseCsrfToken(setCookie, "ds_user_id") ?? "",
   };
+}
+
+/** Parse a concatenated set-cookie header string into a name→value map. */
+function parseCookieMap(setCookieHeader: string): Map<string, string> {
+  const map = new Map<string, string>();
+  // Each Set-Cookie is joined with ", " when accessed via headers.get().
+  // Split on ", " only when followed by a cookie name (word chars + "="),
+  // to avoid splitting on dates like "Thu, 01 Jan 2026 …".
+  const parts = setCookieHeader.split(/,\s*(?=[a-z_][a-z0-9_-]*=)/i);
+  for (const part of parts) {
+    const nameVal = part.trim().split(";")[0];
+    const eq = nameVal.indexOf("=");
+    if (eq > 0) {
+      map.set(nameVal.slice(0, eq).trim(), nameVal.slice(eq + 1).trim());
+    }
+  }
+  return map;
 }
 
 // ---------------------------------------------------------------------------

@@ -65,10 +65,15 @@ export function LoginPage({ onLogin }: Props) {
         });
         setStep("twofa");
       } else {
-        onLogin({ sessionId: result.sessionId, csrfToken: result.csrfToken });
+        onLogin({ sessionId: result.sessionId, csrfToken: result.csrfToken, dsUserId: result.dsUserId });
       }
     } catch (err) {
-      setLoginError(err instanceof Error ? err.message : "Login failed");
+      const msg = err instanceof Error ? err.message : "Login failed";
+      if (msg === "checkpoint_required") {
+        setLoginError("Instagram needs to verify this login. Check your email or SMS for a verification link, click it, then try signing in again.");
+      } else {
+        setLoginError(msg);
+      }
     } finally {
       setLoginLoading(false);
     }

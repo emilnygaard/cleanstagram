@@ -91,7 +91,7 @@ export interface FeedResponse {
 // Auth
 // ---------------------------------------------------------------------------
 export type LoginResult =
-  | { status: "ok"; sessionId: string; csrfToken: string }
+  | { status: "ok"; sessionId: string; csrfToken: string; dsUserId?: string }
   | {
       status: "2fa_required";
       twoFactorIdentifier: string;
@@ -105,7 +105,11 @@ export async function apiLogin(
 ): Promise<LoginResult> {
   const res = await fetch(`${API_BASE}/api/auth/login`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      // Forward the real browser UA so Instagram recognises the device correctly
+      "X-Browser-UA": navigator.userAgent,
+    },
     body: JSON.stringify({ username, password }),
   });
   const data = await res.json();
