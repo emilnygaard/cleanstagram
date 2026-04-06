@@ -16,6 +16,7 @@ app.use(
     origin: "*",
     allowMethods: ["GET", "POST", "OPTIONS"],
     allowHeaders: ["Content-Type", "X-Session-Id", "X-CSRF-Token", "X-CSRF-Token-Hint", "X-DS-User-Id"],
+    maxAge: 86400, // cache preflight for 24h — eliminates the OPTIONS round-trip on every request
   })
 );
 

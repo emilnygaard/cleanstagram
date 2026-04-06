@@ -9,5 +9,6 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/server.ts", "node_modules", "dist"]
 }

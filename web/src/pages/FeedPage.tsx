@@ -428,13 +428,14 @@ export function FeedPage({ session, sessionCode, onLogout }: Props) {
         )}
 
         {/* New posts */}
-        {newPosts.map((post) => (
+        {newPosts.map((post, i) => (
           <PostCard
             key={post.id}
             post={post}
             seen={seenPostIds.has(post.id)}
             session={session}
             onSeen={handlePostSeen}
+            priority={i < 2}
           />
         ))}
 

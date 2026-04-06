@@ -167,11 +167,18 @@ function extractImages(
       ?.candidates as unknown[]
   ) ?? [];
 
-  return (candidates as Record<string, unknown>[]).map((c) => ({
+  const all = (candidates as Record<string, unknown>[]).map((c) => ({
     url: String(c.url ?? ""),
     width: Number(c.width ?? 0),
     height: Number(c.height ?? 0),
   }));
+
+  // Return only the best-fit candidate: smallest image that's still >= 750px wide.
+  // 750px is plenty for retina mobile screens (375px × 2x) and saves significant
+  // bandwidth vs always sending the 1080px version.
+  const sorted = all.slice().sort((a, b) => a.width - b.width);
+  const best = sorted.find((img) => img.width >= 750) ?? sorted[sorted.length - 1];
+  return best ? [best] : [];
 }
 
 function extractCarousel(media: Record<string, unknown>) {

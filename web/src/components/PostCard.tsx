@@ -8,6 +8,7 @@ interface Props {
   seen: boolean;
   session: Session;
   onSeen: (id: string) => void;
+  priority?: boolean; // true for first ~2 posts — loads eagerly at high priority
 }
 
 type CarouselSlide = {
@@ -21,14 +22,16 @@ function bestImage(images: { url: string; width: number; height: number }[]) {
 }
 
 /** Image that fades in from the gray placeholder when loaded. */
-function FadeImg({ src, alt, className }: { src: string; alt: string; className?: string }) {
+function FadeImg({ src, alt, className, priority }: { src: string; alt: string; className?: string; priority?: boolean }) {
   const [loaded, setLoaded] = useState(false);
   return (
     <img
       src={src}
       alt={alt}
       className={`${className ?? ""} transition-opacity duration-300 ${loaded ? "opacity-100" : "opacity-0"}`}
-      loading="lazy"
+      loading={priority ? "eager" : "lazy"}
+      // @ts-expect-error — fetchpriority is valid but not yet in all TS DOM libs
+      fetchpriority={priority ? "high" : "auto"}
       onLoad={() => setLoaded(true)}
     />
   );
@@ -132,7 +135,7 @@ function VideoPlayer({
 // ---------------------------------------------------------------------------
 // PostCard
 // ---------------------------------------------------------------------------
-export function PostCard({ post, seen, session, onSeen }: Props) {
+export function PostCard({ post, seen, session, onSeen, priority = false }: Props) {
   const [carouselIdx, setCarouselIdx] = useState(0);
   const [liked, setLiked] = useState(post.hasLiked);
   const [likeCount, setLikeCount] = useState(post.likeCount);
@@ -262,6 +265,7 @@ export function PostCard({ post, seen, session, onSeen }: Props) {
               src={proxyImage(img.url)}
               alt=""
               className="absolute inset-0 w-full h-full object-cover"
+              priority={priority}
             />
           </div>
         ) : null}
