@@ -46,7 +46,8 @@ export async function getFeed(
   sessionId: string,
   csrfToken: string,
   maxId?: string,
-  dsUserId?: string
+  dsUserId?: string,
+  mid?: string
 ): Promise<FeedResponse> {
   const url = new URL(`${IG_BASE}/api/v1/feed/timeline/`);
   if (maxId) url.searchParams.set("max_id", maxId);
@@ -55,6 +56,7 @@ export async function getFeed(
     `sessionid=${sessionId}`,
     `csrftoken=${csrfToken}`,
     ...(dsUserId ? [`ds_user_id=${dsUserId}`] : []),
+    ...(mid ? [`mid=${mid}`] : []),
   ];
 
   const res = await fetch(url.toString(), {

@@ -22,7 +22,7 @@ export function LoginPage({ onLogin }: Props) {
 
   const [twoFaCode, setTwoFaCode] = useState("");
   const [twoFaState, setTwoFaState] = useState<{
-    identifier: string; csrfToken: string; username: string;
+    identifier: string; csrfToken: string; username: string; mid?: string;
   } | null>(null);
   const [twoFaLoading, setTwoFaLoading] = useState(false);
   const [twoFaError, setTwoFaError] = useState<string | null>(null);
@@ -42,10 +42,10 @@ export function LoginPage({ onLogin }: Props) {
     } else if (twofaParam) {
       try {
         const t = JSON.parse(decodeURIComponent(twofaParam)) as {
-          twoFactorIdentifier: string; csrfToken: string; username: string;
+          twoFactorIdentifier: string; csrfToken: string; username: string; mid?: string;
         };
         window.history.replaceState({}, "", "/");
-        setTwoFaState({ identifier: t.twoFactorIdentifier, csrfToken: t.csrfToken, username: t.username });
+        setTwoFaState({ identifier: t.twoFactorIdentifier, csrfToken: t.csrfToken, username: t.username, mid: t.mid });
         setStep("twofa");
       } catch { /* ignore */ }
     }
@@ -62,10 +62,11 @@ export function LoginPage({ onLogin }: Props) {
           identifier: result.twoFactorIdentifier,
           csrfToken: result.csrfToken,
           username: result.username,
+          mid: result.mid,
         });
         setStep("twofa");
       } else {
-        onLogin({ sessionId: result.sessionId, csrfToken: result.csrfToken, dsUserId: result.dsUserId });
+        onLogin({ sessionId: result.sessionId, csrfToken: result.csrfToken, dsUserId: result.dsUserId, mid: result.mid });
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Login failed";
@@ -98,7 +99,7 @@ export function LoginPage({ onLogin }: Props) {
     setTwoFaLoading(true);
     try {
       const session = await apiVerify2FA(
-        twoFaState.username, twoFaCode, twoFaState.identifier, twoFaState.csrfToken
+        twoFaState.username, twoFaCode, twoFaState.identifier, twoFaState.csrfToken, twoFaState.mid
       );
       onLogin(session);
     } catch (err) {

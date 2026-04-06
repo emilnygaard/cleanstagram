@@ -86,12 +86,14 @@ export async function markStoriesSeen(
 export async function getStoriesTray(
   sessionId: string,
   csrfToken: string,
-  dsUserId?: string
+  dsUserId?: string,
+  mid?: string
 ): Promise<StoriesResponse> {
   const cookieParts = [
     `sessionid=${sessionId}`,
     `csrftoken=${csrfToken}`,
     ...(dsUserId ? [`ds_user_id=${dsUserId}`] : []),
+    ...(mid ? [`mid=${mid}`] : []),
   ];
 
   const headers = {

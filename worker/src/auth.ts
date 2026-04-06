@@ -202,8 +202,8 @@ export async function directLogin(
   password: string,
   userAgent: string
 ): Promise<
-  | { status: "ok"; sessionId: string; csrfToken: string; dsUserId: string }
-  | { status: "2fa_required"; twoFactorIdentifier: string; csrfToken: string; username: string }
+  | { status: "ok"; sessionId: string; csrfToken: string; dsUserId: string; mid: string }
+  | { status: "2fa_required"; twoFactorIdentifier: string; csrfToken: string; username: string; mid: string }
   | { status: "checkpoint" }
   | { status: "error"; error: string }
 > {
@@ -285,6 +285,7 @@ export async function directLogin(
       twoFactorIdentifier: tf.two_factor_identifier,
       csrfToken: parseCsrfToken(setCookie, "csrftoken") ?? csrfToken,
       username,
+      mid: initialCookies.get("mid") ?? "",  // carry mid through 2FA flow
     };
   }
 
@@ -301,6 +302,7 @@ export async function directLogin(
     sessionId,
     csrfToken: parseCsrfToken(setCookie, "csrftoken") ?? csrfToken,
     dsUserId: parseCsrfToken(setCookie, "ds_user_id") ?? "",
+    mid: initialCookies.get("mid") ?? "",
   };
 }
 
@@ -330,8 +332,9 @@ export async function verify2FA(
   username: string,
   code: string,
   twoFactorIdentifier: string,
-  csrfToken: string
-): Promise<{ sessionId: string; csrfToken: string }> {
+  csrfToken: string,
+  mid?: string
+): Promise<{ sessionId: string; csrfToken: string; dsUserId: string; mid: string }> {
   const body = new URLSearchParams({
     username,
     verificationCode: code.replace(/\s/g, ""),
@@ -340,6 +343,8 @@ export async function verify2FA(
     trustedDevice: "0",
     verificationMethod: "1",
   });
+
+  const cookieParts = [`csrftoken=${csrfToken}`, ...(mid ? [`mid=${mid}`] : [])];
 
   const res = await fetch(`${IG_BASE}/accounts/login/ajax/two_factor/`, {
     method: "POST",
@@ -352,13 +357,18 @@ export async function verify2FA(
       "X-IG-App-ID": "936619743392459",
       Referer: `${IG_BASE}/accounts/login/`,
       Origin: IG_BASE,
-      Cookie: `csrftoken=${csrfToken}`,
+      Cookie: cookieParts.join("; "),
     },
     body: body.toString(),
   });
 
   const setCookie = res.headers.get("set-cookie") ?? "";
   const data = (await res.json()) as Record<string, unknown>;
+
+  console.log("[2fa] authenticated:", data.authenticated,
+    "| has sessionid:", !!parseCsrfToken(setCookie, "sessionid"),
+    "| has ds_user_id:", !!parseCsrfToken(setCookie, "ds_user_id"),
+    "| mid sent:", !!mid);
 
   if (!data.authenticated) throw new Error("2FA verification failed — wrong code?");
 
@@ -367,7 +377,9 @@ export async function verify2FA(
 
   return {
     sessionId,
-    csrfToken: parseCsrfToken(setCookie) ?? csrfToken,
+    csrfToken: parseCsrfToken(setCookie, "csrftoken") ?? csrfToken,
+    dsUserId: parseCsrfToken(setCookie, "ds_user_id") ?? "",
+    mid: parseCsrfToken(setCookie, "mid") ?? mid ?? "",
   };
 }
 

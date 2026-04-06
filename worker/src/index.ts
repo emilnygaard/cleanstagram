@@ -15,7 +15,7 @@ app.use(
   cors({
     origin: "*",
     allowMethods: ["GET", "POST", "OPTIONS"],
-    allowHeaders: ["Content-Type", "X-Session-Id", "X-CSRF-Token", "X-CSRF-Token-Hint", "X-DS-User-Id", "X-Browser-UA"],
+    allowHeaders: ["Content-Type", "X-Session-Id", "X-CSRF-Token", "X-CSRF-Token-Hint", "X-DS-User-Id", "X-Browser-UA", "X-Mid"],
     maxAge: 86400, // cache preflight for 24h — eliminates the OPTIONS round-trip on every request
   })
 );
@@ -72,12 +72,13 @@ app.post("/api/auth/submit", async (c) => {
 // Body: { username, code, twoFactorIdentifier, csrfToken }
 // ---------------------------------------------------------------------------
 app.post("/api/auth/2fa", async (c) => {
-  const { username, code, twoFactorIdentifier, csrfToken } =
+  const { username, code, twoFactorIdentifier, csrfToken, mid } =
     await c.req.json<{
       username: string;
       code: string;
       twoFactorIdentifier: string;
       csrfToken: string;
+      mid?: string;
     }>();
 
   if (!username || !code || !twoFactorIdentifier || !csrfToken) {
@@ -85,7 +86,7 @@ app.post("/api/auth/2fa", async (c) => {
   }
 
   try {
-    const result = await verify2FA(username, code, twoFactorIdentifier, csrfToken);
+    const result = await verify2FA(username, code, twoFactorIdentifier, csrfToken, mid);
     return c.json({ status: "ok", ...result });
   } catch (err) {
     const message = err instanceof Error ? err.message : "2FA failed";
@@ -101,16 +102,17 @@ app.get("/api/feed", async (c) => {
   const sessionId = c.req.header("X-Session-Id");
   const csrfToken = c.req.header("X-CSRF-Token");
   const dsUserId = c.req.header("X-DS-User-Id");
+  const mid = c.req.header("X-Mid");
   const maxId = c.req.query("maxId");
 
-  console.log(`[feed] sessionId=${sessionId ? sessionId.slice(0, 8) + "…" : "(missing)"} csrfToken=${csrfToken ? csrfToken.slice(0, 8) + "…" : "(missing)"} dsUserId=${dsUserId ?? "(missing)"}`);
+  console.log(`[feed] sessionId=${sessionId ? sessionId.slice(0, 8) + "…" : "(missing)"} csrfToken=${csrfToken ? csrfToken.slice(0, 8) + "…" : "(missing)"} dsUserId=${dsUserId ?? "(none)"} mid=${mid ? mid.slice(0, 8) + "…" : "(none)"}`);
 
   if (!sessionId || !csrfToken) {
     return c.json({ error: "Not authenticated" }, 401);
   }
 
   try {
-    const feed = await getFeed(sessionId, csrfToken, maxId, dsUserId);
+    const feed = await getFeed(sessionId, csrfToken, maxId, dsUserId, mid);
     return c.json(feed);
   } catch (err) {
     if (err instanceof Error && err.message === "UNAUTHORIZED") {
@@ -129,13 +131,14 @@ app.get("/api/stories", async (c) => {
   const sessionId = c.req.header("X-Session-Id");
   const csrfToken = c.req.header("X-CSRF-Token");
   const dsUserId = c.req.header("X-DS-User-Id");
+  const mid = c.req.header("X-Mid");
 
   if (!sessionId || !csrfToken) {
     return c.json({ error: "Not authenticated" }, 401);
   }
 
   try {
-    const data = await getStoriesTray(sessionId, csrfToken, dsUserId);
+    const data = await getStoriesTray(sessionId, csrfToken, dsUserId, mid);
     return c.json(data);
   } catch (err) {
     if (err instanceof Error && err.message === "UNAUTHORIZED") {

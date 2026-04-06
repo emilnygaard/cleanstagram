@@ -14,6 +14,7 @@ export interface Session {
   sessionId: string;
   csrfToken: string;
   dsUserId?: string;
+  mid?: string;
 }
 
 export interface FeedPost {
@@ -73,6 +74,7 @@ export async function apiComments(
       "X-Session-Id": session.sessionId,
       "X-CSRF-Token": session.csrfToken,
       ...(session.dsUserId ? { "X-DS-User-Id": session.dsUserId } : {}),
+      ...(session.mid ? { "X-Mid": session.mid } : {}),
     },
   });
 
@@ -91,12 +93,13 @@ export interface FeedResponse {
 // Auth
 // ---------------------------------------------------------------------------
 export type LoginResult =
-  | { status: "ok"; sessionId: string; csrfToken: string; dsUserId?: string }
+  | { status: "ok"; sessionId: string; csrfToken: string; dsUserId?: string; mid?: string }
   | {
       status: "2fa_required";
       twoFactorIdentifier: string;
       csrfToken: string;
       username: string;
+      mid?: string;
     };
 
 export async function apiLogin(
@@ -121,12 +124,13 @@ export async function apiVerify2FA(
   username: string,
   code: string,
   twoFactorIdentifier: string,
-  csrfToken: string
+  csrfToken: string,
+  mid?: string
 ): Promise<Session> {
   const res = await fetch(`${API_BASE}/api/auth/2fa`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, code, twoFactorIdentifier, csrfToken }),
+    body: JSON.stringify({ username, code, twoFactorIdentifier, csrfToken, mid }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error ?? "2FA failed");
@@ -176,6 +180,7 @@ export async function apiMarkStoriesSeen(
       "X-Session-Id": session.sessionId,
       "X-CSRF-Token": session.csrfToken,
       ...(session.dsUserId ? { "X-DS-User-Id": session.dsUserId } : {}),
+      ...(session.mid ? { "X-Mid": session.mid } : {}),
     },
     body: JSON.stringify({ reels }),
   }).catch(() => {});
@@ -187,6 +192,7 @@ export async function apiStories(session: Session): Promise<StoriesResponse> {
       "X-Session-Id": session.sessionId,
       "X-CSRF-Token": session.csrfToken,
       ...(session.dsUserId ? { "X-DS-User-Id": session.dsUserId } : {}),
+      ...(session.mid ? { "X-Mid": session.mid } : {}),
     },
   });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
@@ -210,6 +216,7 @@ export async function apiLike(
       "X-Session-Id": session.sessionId,
       "X-CSRF-Token": session.csrfToken,
       ...(session.dsUserId ? { "X-DS-User-Id": session.dsUserId } : {}),
+      ...(session.mid ? { "X-Mid": session.mid } : {}),
     },
   });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
@@ -228,6 +235,7 @@ export async function apiFeed(
       "X-Session-Id": session.sessionId,
       "X-CSRF-Token": session.csrfToken,
       ...(session.dsUserId ? { "X-DS-User-Id": session.dsUserId } : {}),
+      ...(session.mid ? { "X-Mid": session.mid } : {}),
     },
   });
 
