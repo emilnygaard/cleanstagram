@@ -191,6 +191,98 @@ export async function submitLogin(
 }
 
 // ---------------------------------------------------------------------------
+// POST /api/auth/login
+// The Pi submits the login directly to Instagram from its residential IP.
+// No browser proxying required — just username + password JSON.
+// ---------------------------------------------------------------------------
+export async function directLogin(
+  username: string,
+  password: string
+): Promise<
+  | { status: "ok"; sessionId: string; csrfToken: string; dsUserId: string }
+  | { status: "2fa_required"; twoFactorIdentifier: string; csrfToken: string; username: string }
+  | { status: "error"; error: string }
+> {
+  const UA =
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1";
+
+  // Step 1 — Fetch the login page to get a fresh csrftoken cookie
+  const pageRes = await fetch(`${IG_BASE}/accounts/login/`, {
+    headers: {
+      "User-Agent": UA,
+      Accept: "text/html,application/xhtml+xml,*/*",
+      "Accept-Language": "en-US,en;q=0.9",
+    },
+    redirect: "follow",
+  });
+  const pageCookies = pageRes.headers.get("set-cookie") ?? "";
+  const csrfToken = parseCsrfToken(pageCookies, "csrftoken") ?? "";
+
+  // Step 2 — Submit credentials to Instagram's AJAX login endpoint
+  // enc_password format ":0:{timestamp}:{plain}" means "version 0 = no encryption"
+  const encPassword = `#PWD_INSTAGRAM_BROWSER:0:${Math.floor(Date.now() / 1000)}:${password}`;
+  const body = new URLSearchParams({
+    username,
+    enc_password: encPassword,
+    queryParams: "{}",
+    optIntoOneTap: "false",
+  });
+
+  const loginRes = await fetch(`${IG_BASE}/accounts/login/ajax/`, {
+    method: "POST",
+    headers: {
+      "User-Agent": UA,
+      "Content-Type": "application/x-www-form-urlencoded",
+      "X-CSRFToken": csrfToken,
+      "X-Requested-With": "XMLHttpRequest",
+      "X-IG-App-ID": "936619743392459",
+      Referer: `${IG_BASE}/accounts/login/`,
+      Origin: IG_BASE,
+      Cookie: `csrftoken=${csrfToken}`,
+    },
+    body: body.toString(),
+    redirect: "manual",
+  });
+
+  if (loginRes.status === 301 || loginRes.status === 302) {
+    return { status: "error", error: "Login blocked — try again later" };
+  }
+
+  const setCookie = loginRes.headers.get("set-cookie") ?? "";
+  let data: Record<string, unknown>;
+  try {
+    data = (await loginRes.json()) as Record<string, unknown>;
+  } catch {
+    return { status: "error", error: "Unexpected response from Instagram" };
+  }
+
+  if (data.two_factor_required) {
+    const tf = data.two_factor_info as Record<string, string>;
+    return {
+      status: "2fa_required",
+      twoFactorIdentifier: tf.two_factor_identifier,
+      csrfToken: parseCsrfToken(setCookie, "csrftoken") ?? csrfToken,
+      username,
+    };
+  }
+
+  if (!data.authenticated) {
+    const msg = data.message ? String(data.message) : "Wrong username or password";
+    return { status: "error", error: msg };
+  }
+
+  const sessionId = parseCsrfToken(setCookie, "sessionid");
+  if (!sessionId) return { status: "error", error: "No session cookie returned" };
+
+  return {
+    status: "ok",
+    sessionId,
+    csrfToken: parseCsrfToken(setCookie, "csrftoken") ?? csrfToken,
+    dsUserId: parseCsrfToken(setCookie, "ds_user_id") ?? "",
+  };
+}
+
+// ---------------------------------------------------------------------------
 // POST /api/auth/2fa  (unchanged — browser submits 2FA code to our worker,
 // worker forwards to Instagram from worker IP; 2FA verification is less
 // IP-sensitive than password auth)

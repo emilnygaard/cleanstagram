@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
-import { getLoginPage, submitLogin, verify2FA } from "./auth";
+import { getLoginPage, submitLogin, verify2FA, directLogin } from "./auth";
 import { getFeed } from "./feed";
 import { getStoriesTray, markStoriesSeen } from "./stories";
 import { getComments } from "./comments";
@@ -30,6 +30,20 @@ app.get("/api/auth/login-page", async (c) => {
   const ua = c.req.header("User-Agent") ?? "";
   const returnTo = c.req.query("returnTo") ?? "";
   return getLoginPage(ua, returnTo);
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/auth/login
+// Body: { username, password }
+// Pi submits directly to Instagram from residential IP — no browser proxy needed.
+// ---------------------------------------------------------------------------
+app.post("/api/auth/login", async (c) => {
+  const { username, password } = await c.req.json<{ username: string; password: string }>();
+  if (!username || !password) return c.json({ error: "Missing username or password" }, 400);
+
+  const result = await directLogin(username, password);
+  if (result.status === "error") return c.json({ error: result.error }, 401);
+  return c.json(result);
 });
 
 // ---------------------------------------------------------------------------

@@ -1,19 +1,21 @@
 import { useState, useEffect } from "react";
 import type { FormEvent } from "react";
-import { apiVerify2FA } from "../api";
+import { apiLogin, apiVerify2FA } from "../api";
 import type { Session } from "../api";
-
-const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8787";
 
 interface Props {
   onLogin: (session: Session) => void;
 }
 
-type Step = "start" | "waiting" | "twofa" | "import-code";
+type Step = "start" | "twofa" | "import-code";
 
 export function LoginPage({ onLogin }: Props) {
   const [step, setStep] = useState<Step>("start");
-  const [loginWindow, setLoginWindow] = useState<Window | null>(null);
+
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
 
   const [importCode, setImportCode] = useState("");
   const [importError, setImportError] = useState<string | null>(null);
@@ -25,7 +27,7 @@ export function LoginPage({ onLogin }: Props) {
   const [twoFaLoading, setTwoFaLoading] = useState(false);
   const [twoFaError, setTwoFaError] = useState<string | null>(null);
 
-  // Handle ?session= or ?twofa= params when the Pi redirects back after login
+  // Handle ?session= or ?twofa= params if the old proxy flow ever redirects back
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const sessionParam = params.get("session");
@@ -36,9 +38,7 @@ export function LoginPage({ onLogin }: Props) {
         const s = JSON.parse(decodeURIComponent(sessionParam)) as Session;
         window.history.replaceState({}, "", "/");
         onLogin(s);
-      } catch {
-        // ignore malformed param
-      }
+      } catch { /* ignore */ }
     } else if (twofaParam) {
       try {
         const t = JSON.parse(decodeURIComponent(twofaParam)) as {
@@ -51,12 +51,27 @@ export function LoginPage({ onLogin }: Props) {
     }
   }, [onLogin]);
 
-  function openLoginPage() {
-    const returnTo = window.location.origin;
-    const url = `${API_BASE}/api/auth/login-page?returnTo=${encodeURIComponent(returnTo)}`;
-    const w = window.open(url, "_blank", "noopener");
-    setLoginWindow(w);
-    setStep("waiting");
+  async function handleLogin(e: FormEvent) {
+    e.preventDefault();
+    setLoginError(null);
+    setLoginLoading(true);
+    try {
+      const result = await apiLogin(username, password);
+      if (result.status === "2fa_required") {
+        setTwoFaState({
+          identifier: result.twoFactorIdentifier,
+          csrfToken: result.csrfToken,
+          username: result.username,
+        });
+        setStep("twofa");
+      } else {
+        onLogin({ sessionId: result.sessionId, csrfToken: result.csrfToken });
+      }
+    } catch (err) {
+      setLoginError(err instanceof Error ? err.message : "Login failed");
+    } finally {
+      setLoginLoading(false);
+    }
   }
 
   function handleImportCode(e: FormEvent) {
@@ -148,48 +163,37 @@ export function LoginPage({ onLogin }: Props) {
     );
   }
 
-  // ── Waiting for login tab ───────────────────────────────────────────────────
-  if (step === "waiting") {
-    return (
-      <Screen>
-        <Card className="text-center space-y-4">
-          <div className="w-10 h-10 border-2 border-gray-200 border-t-gray-800 rounded-full animate-spin mx-auto" />
-          <div>
-            <p className="text-sm font-medium text-gray-900">Waiting for Instagram…</p>
-            <p className="text-xs text-gray-500 mt-1">
-              Sign in on the tab that just opened, then come back here.
-            </p>
-          </div>
-          <div className="space-y-2 pt-1">
-            <button
-              onClick={openLoginPage}
-              className="w-full py-2.5 border border-gray-200 text-sm text-gray-600 rounded-xl hover:bg-gray-50"
-            >
-              Reopen login tab
-            </button>
-            <button
-              onClick={() => { loginWindow?.close(); setStep("start"); }}
-              className="w-full py-2 text-xs text-gray-400 hover:text-gray-600"
-            >
-              Cancel
-            </button>
-          </div>
-        </Card>
-      </Screen>
-    );
-  }
-
-  // ── Start ───────────────────────────────────────────────────────────────────
+  // ── Start — username/password form ─────────────────────────────────────────
   return (
     <Screen>
-      <Card className="space-y-3">
-        <p className="text-sm text-gray-500 text-center">
-          Sign in with your Instagram account to get started.
-        </p>
-        <Btn onClick={openLoginPage}>
-          Sign in with Instagram →
-        </Btn>
-        <div className="text-center">
+      <Card>
+        <form onSubmit={handleLogin} className="space-y-3">
+          <input
+            type="text"
+            placeholder="Username"
+            value={username}
+            onChange={(e) => { setUsername(e.target.value); setLoginError(null); }}
+            autoComplete="username"
+            autoCapitalize="none"
+            autoCorrect="off"
+            required
+            className="w-full px-3 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-gray-900/10"
+          />
+          <input
+            type="password"
+            placeholder="Password"
+            value={password}
+            onChange={(e) => { setPassword(e.target.value); setLoginError(null); }}
+            autoComplete="current-password"
+            required
+            className="w-full px-3 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-gray-900/10"
+          />
+          {loginError && <p className="text-red-500 text-sm text-center">{loginError}</p>}
+          <Btn type="submit" disabled={loginLoading || !username || !password}>
+            {loginLoading ? "Signing in…" : "Sign in"}
+          </Btn>
+        </form>
+        <div className="text-center mt-3">
           <button
             onClick={() => setStep("import-code")}
             className="text-xs text-gray-400 underline hover:text-gray-600"
