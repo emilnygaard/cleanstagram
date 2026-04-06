@@ -103,6 +103,8 @@ app.get("/api/feed", async (c) => {
   const dsUserId = c.req.header("X-DS-User-Id");
   const maxId = c.req.query("maxId");
 
+  console.log(`[feed] sessionId=${sessionId ? sessionId.slice(0, 8) + "…" : "(missing)"} csrfToken=${csrfToken ? csrfToken.slice(0, 8) + "…" : "(missing)"} dsUserId=${dsUserId ?? "(missing)"}`);
+
   if (!sessionId || !csrfToken) {
     return c.json({ error: "Not authenticated" }, 401);
   }
