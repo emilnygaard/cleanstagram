@@ -186,13 +186,14 @@ export async function apiMarkStoriesSeen(
   }).catch(() => {});
 }
 
-export async function apiStories(session: Session): Promise<StoriesResponse> {
+export async function apiStories(session: Session, noCache = false): Promise<StoriesResponse> {
   const res = await fetch(`${API_BASE}/api/stories`, {
     headers: {
       "X-Session-Id": session.sessionId,
       "X-CSRF-Token": session.csrfToken,
       ...(session.dsUserId ? { "X-DS-User-Id": session.dsUserId } : {}),
       ...(session.mid ? { "X-Mid": session.mid } : {}),
+      ...(noCache ? { "X-No-Cache": "1" } : {}),
     },
   });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
@@ -225,7 +226,8 @@ export async function apiLike(
 
 export async function apiFeed(
   session: Session,
-  maxId?: string
+  maxId?: string,
+  noCache = false
 ): Promise<FeedResponse> {
   const url = new URL(`${API_BASE}/api/feed`);
   if (maxId) url.searchParams.set("maxId", maxId);
@@ -236,6 +238,7 @@ export async function apiFeed(
       "X-CSRF-Token": session.csrfToken,
       ...(session.dsUserId ? { "X-DS-User-Id": session.dsUserId } : {}),
       ...(session.mid ? { "X-Mid": session.mid } : {}),
+      ...(noCache ? { "X-No-Cache": "1" } : {}),
     },
   });
 

@@ -6,6 +6,11 @@ import { getFeed } from "./feed";
 import { getStoriesTray, markStoriesSeen } from "./stories";
 import { getComments } from "./comments";
 import { likeMedia } from "./like";
+import { readCache, writeCache } from "./cache";
+import { storeSession } from "./session-store";
+
+// How old a cache entry can be before we serve it AND kick off a background refresh
+const CACHE_STALE_MS = 5 * 60 * 1000; // 5 minutes
 
 const app = new Hono();
 
@@ -15,7 +20,7 @@ app.use(
   cors({
     origin: "*",
     allowMethods: ["GET", "POST", "OPTIONS"],
-    allowHeaders: ["Content-Type", "X-Session-Id", "X-CSRF-Token", "X-CSRF-Token-Hint", "X-DS-User-Id", "X-Browser-UA", "X-Mid"],
+    allowHeaders: ["Content-Type", "X-Session-Id", "X-CSRF-Token", "X-CSRF-Token-Hint", "X-DS-User-Id", "X-Browser-UA", "X-Mid", "X-No-Cache"],
     maxAge: 86400, // cache preflight for 24h — eliminates the OPTIONS round-trip on every request
   })
 );
@@ -47,6 +52,10 @@ app.post("/api/auth/login", async (c) => {
 
   if (result.status === "error") return c.json({ error: result.error }, 401);
   if (result.status === "checkpoint") return c.json({ error: "checkpoint_required" }, 401);
+  // Persist session so the background fetcher can keep the cache warm
+  if (result.status === "ok" && result.dsUserId) {
+    storeSession({ sessionId: result.sessionId, csrfToken: result.csrfToken, dsUserId: result.dsUserId, mid: result.mid });
+  }
   return c.json(result);
 });
 
@@ -87,6 +96,9 @@ app.post("/api/auth/2fa", async (c) => {
 
   try {
     const result = await verify2FA(username, code, twoFactorIdentifier, csrfToken, mid);
+    if (result.dsUserId) {
+      storeSession({ sessionId: result.sessionId, csrfToken: result.csrfToken, dsUserId: result.dsUserId, mid: result.mid });
+    }
     return c.json({ status: "ok", ...result });
   } catch (err) {
     const message = err instanceof Error ? err.message : "2FA failed";
@@ -111,8 +123,27 @@ app.get("/api/feed", async (c) => {
     return c.json({ error: "Not authenticated" }, 401);
   }
 
+  const noCache = c.req.header("X-No-Cache") === "1";
+
+  // Serve from cache when available (first page only — paginated requests always fetch live)
+  if (!noCache && !maxId && dsUserId) {
+    const cached = readCache(dsUserId, "feed");
+    if (cached) {
+      const age = Date.now() - cached.fetchedAt;
+      // Background-refresh if stale, but always return cached data immediately
+      if (age > CACHE_STALE_MS) {
+        getFeed(sessionId, csrfToken, undefined, dsUserId, mid)
+          .then(f => writeCache(dsUserId, "feed", f))
+          .catch(() => {});
+      }
+      console.log(`[feed] served from cache (age ${Math.round(age / 1000)}s)`);
+      return c.json(cached.data);
+    }
+  }
+
   try {
     const feed = await getFeed(sessionId, csrfToken, maxId, dsUserId, mid);
+    if (!maxId && dsUserId) writeCache(dsUserId, "feed", feed);
     return c.json(feed);
   } catch (err) {
     if (err instanceof Error && err.message === "UNAUTHORIZED") {
@@ -137,8 +168,25 @@ app.get("/api/stories", async (c) => {
     return c.json({ error: "Not authenticated" }, 401);
   }
 
+  const noCache = c.req.header("X-No-Cache") === "1";
+
+  if (!noCache && dsUserId) {
+    const cached = readCache(dsUserId, "stories");
+    if (cached) {
+      const age = Date.now() - cached.fetchedAt;
+      if (age > CACHE_STALE_MS) {
+        getStoriesTray(sessionId, csrfToken, dsUserId, mid)
+          .then(s => writeCache(dsUserId, "stories", s))
+          .catch(() => {});
+      }
+      console.log(`[stories] served from cache (age ${Math.round(age / 1000)}s)`);
+      return c.json(cached.data);
+    }
+  }
+
   try {
     const data = await getStoriesTray(sessionId, csrfToken, dsUserId, mid);
+    if (dsUserId) writeCache(dsUserId, "stories", data);
     return c.json(data);
   } catch (err) {
     if (err instanceof Error && err.message === "UNAUTHORIZED") {

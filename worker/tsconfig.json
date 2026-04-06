@@ -10,5 +10,5 @@
     "noUnusedParameters": true
   },
   "include": ["src"],
-  "exclude": ["src/server.ts", "node_modules", "dist"]
+  "exclude": ["src/server.ts", "src/cache.ts", "src/session-store.ts", "src/background.ts", "node_modules", "dist"]
 }

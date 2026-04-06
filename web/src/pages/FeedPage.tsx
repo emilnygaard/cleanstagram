@@ -94,13 +94,13 @@ export function FeedPage({ session, sessionCode, onLogout }: Props) {
   // Feed loading
   // -------------------------------------------------------------------------
   const loadFeed = useCallback(
-    async (maxId?: string) => {
+    async (maxId?: string, noCache = false) => {
       if (loadingRef.current) return;
       loadingRef.current = true;
       setLoading(true);
       setError(null);
       try {
-        const data = await apiFeed(session, maxId);
+        const data = await apiFeed(session, maxId, noCache);
         setPosts((prev) => {
           const merged = mergePosts(prev, data.posts);
           saveFeedCache(merged);
@@ -121,9 +121,9 @@ export function FeedPage({ session, sessionCode, onLogout }: Props) {
     [session]
   );
 
-  const refreshFeed = useCallback(async () => {
+  const refreshFeed = useCallback(async (noCache = false) => {
     if (loadingRef.current) return;
-    await loadFeed();
+    await loadFeed(undefined, noCache);
   }, [loadFeed]);
 
   // -------------------------------------------------------------------------
@@ -248,11 +248,13 @@ export function FeedPage({ session, sessionCode, onLogout }: Props) {
 
   const handleTouchEnd = useCallback(() => {
     if (pulling) {
-      void refreshFeed();
+      // Pull-to-refresh bypasses cache — user explicitly wants fresh data
+      void refreshFeed(true);
+      apiStories(session, true).then(d => setStories(d.stories)).catch(() => {});
     }
     setPullY(0);
     setPulling(false);
-  }, [pulling, refreshFeed]);
+  }, [pulling, refreshFeed, session]);
 
   // -------------------------------------------------------------------------
   // Render
