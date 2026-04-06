@@ -59,21 +59,32 @@ export async function getLoginPage(
   const safeReturn = returnTo.replace(/['"<>]/g, "");
   const inject = `<script>
 (function() {
-  // Intercept fetch calls to Instagram's consent/cookie API endpoints.
-  // These calls fail with CORS errors because the page is served from our
-  // Pi's origin instead of instagram.com. Faking a success response lets
-  // the cookie consent dialog dismiss itself normally.
-  var _fetch = window.fetch;
-  window.fetch = function(input, init) {
-    var url = typeof input === 'string' ? input : (input instanceof Request ? input.url : String(input));
-    if (url.includes('/consent') || url.includes('/cookie') || url.includes('cookieless')) {
-      return Promise.resolve(new Response('{"status":"ok"}', {
-        status: 200,
-        headers: {'Content-Type': 'application/json'}
-      }));
-    }
-    return _fetch.apply(this, arguments);
-  };
+  // Instagram's cookie consent dialog makes CORS-blocked API calls when
+  // served from our Pi origin. Rather than trying to intercept the network
+  // calls, watch the DOM and remove the dialog as soon as it appears.
+  // The login form underneath is fully functional without accepting cookies.
+  function removeCookieDialogs() {
+    document.querySelectorAll('[role="dialog"],[role="alertdialog"]').forEach(function(el) {
+      if ((el.textContent || '').toLowerCase().includes('cookie')) {
+        el.parentNode && el.parentNode.removeChild(el);
+      }
+    });
+    // Remove any fixed/absolute overlays that block interaction
+    document.querySelectorAll('body > div').forEach(function(el) {
+      var s = window.getComputedStyle(el);
+      if ((s.position === 'fixed' || s.position === 'absolute') && s.zIndex > '10') {
+        var txt = (el.textContent || '').toLowerCase();
+        if (txt.includes('cookie') || txt.includes('consent')) {
+          el.parentNode && el.parentNode.removeChild(el);
+        }
+      }
+    });
+  }
+  removeCookieDialogs();
+  var _obs = new MutationObserver(removeCookieDialogs);
+  _obs.observe(document.documentElement, { childList: true, subtree: true });
+  // Stop observing after 15s — we only need this during initial page load
+  setTimeout(function() { _obs.disconnect(); }, 15000);
 
   document.addEventListener('DOMContentLoaded', function() {
     document.querySelectorAll('form').forEach(function(form) {
