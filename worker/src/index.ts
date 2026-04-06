@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { logger } from "hono/logger";
 import { getLoginPage, submitLogin, verify2FA } from "./auth";
 import { getFeed } from "./feed";
 import { getStoriesTray, markStoriesSeen } from "./stories";
@@ -8,6 +9,7 @@ import { likeMedia } from "./like";
 
 const app = new Hono();
 
+app.use("*", logger());
 app.use(
   "*",
   cors({
@@ -240,7 +242,10 @@ app.get("/api/proxy/image", async (c) => {
       return new Response("Upstream error", { status: upstream.status });
     }
 
-    return new Response(upstream.body, {
+    // Buffer the full response before sending — streaming bodies are not
+    // reliable through Tailscale Funnel / Node.js HTTP adapter.
+    const buffer = await upstream.arrayBuffer();
+    return new Response(buffer, {
       status: 200,
       headers: {
         "Content-Type": upstream.headers.get("Content-Type") ?? "image/jpeg",
