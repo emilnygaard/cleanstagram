@@ -69,14 +69,19 @@ export async function getFeed(
 
   // Instagram redirects to login when the session is invalid/missing
   if (res.status === 301 || res.status === 302 || res.status === 303) {
+    console.log(`[feed] redirect ${res.status} → ${res.headers.get("location")}`);
     throw new Error("UNAUTHORIZED");
   }
 
   if (res.status === 401 || res.status === 403) {
+    const body = await res.text().catch(() => "(unreadable)");
+    console.log(`[feed] ${res.status} response:`, body.slice(0, 500));
     throw new Error("UNAUTHORIZED");
   }
 
   if (!res.ok) {
+    const body = await res.text().catch(() => "(unreadable)");
+    console.log(`[feed] ${res.status} error:`, body.slice(0, 500));
     throw new Error(`Feed request failed: ${res.status}`);
   }
 
