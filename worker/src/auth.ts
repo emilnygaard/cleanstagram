@@ -1,3 +1,10 @@
+import {
+  publicEncrypt,
+  randomBytes,
+  createCipheriv,
+  constants as cryptoConstants,
+} from "node:crypto";
+
 // ---------------------------------------------------------------------------
 // Auth via proxied Instagram login page.
 //
@@ -232,7 +239,7 @@ export async function directLogin(
   const timestamp = Math.floor(Date.now() / 1000);
   const encConfig = extractEncryptionConfig(pageHtml);
   const encPassword = encConfig
-    ? await encryptPassword(password, encConfig.keyId, encConfig.publicKey, timestamp)
+    ? encryptPassword(password, encConfig.keyId, encConfig.publicKey, timestamp)
     : `#PWD_INSTAGRAM_BROWSER:0:${timestamp}:${password}`; // fallback if key not found
   const body = new URLSearchParams({
     username,
@@ -320,6 +327,7 @@ export async function directLogin(
 // Password encryption — Instagram enc_password version 10
 // RSA-OAEP (SHA-256) wraps a random AES-256-GCM key; AES-GCM encrypts the
 // password. The public key and key ID are embedded in the login page HTML.
+// Node.js crypto is used directly — this function only runs on the Pi.
 // ---------------------------------------------------------------------------
 
 function extractEncryptionConfig(html: string): { keyId: number; publicKey: string } | null {
@@ -334,61 +342,38 @@ function extractEncryptionConfig(html: string): { keyId: number; publicKey: stri
   return { keyId: Number(m[1]), publicKey };
 }
 
-async function encryptPassword(
+function encryptPassword(
   password: string,
   keyId: number,
   publicKeyPem: string,
   timestamp: number
-): Promise<string> {
-  const subtle = globalThis.crypto.subtle;
+): string {
+  // Random AES-256 key + 12-byte IV
+  const aesKey = randomBytes(32);
+  const iv     = randomBytes(12);
 
-  // Import Instagram's RSA public key (SPKI/PEM)
-  const pemBody = publicKeyPem
-    .replace(/-----BEGIN PUBLIC KEY-----/, "")
-    .replace(/-----END PUBLIC KEY-----/, "")
-    .replace(/\s+/g, "");
-  const spki = Uint8Array.from(atob(pemBody), (c) => c.charCodeAt(0));
-  const rsaKey = await subtle.importKey(
-    "spki",
-    spki,
-    { name: "RSA-OAEP", hash: "SHA-256" },
-    false,
-    ["encrypt"]
+  // RSA-OAEP SHA-256 encrypt the AES key with Instagram's public key
+  const encryptedAesKey = publicEncrypt(
+    { key: publicKeyPem, oaepHash: "sha256", padding: cryptoConstants.RSA_PKCS1_OAEP_PADDING },
+    aesKey
   );
 
-  // Generate a random AES-256-GCM key and IV
-  const aesKey = await subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt"]);
-  const iv = globalThis.crypto.getRandomValues(new Uint8Array(12));
-  const rawAesKey = new Uint8Array(await subtle.exportKey("raw", aesKey));
+  // AES-256-GCM encrypt the password; timestamp string is the additional data
+  const cipher = createCipheriv("aes-256-gcm", aesKey, iv);
+  cipher.setAAD(Buffer.from(String(timestamp)));
+  const ciphertext = Buffer.concat([cipher.update(password, "utf8"), cipher.final()]);
+  const authTag    = cipher.getAuthTag(); // 16 bytes
 
-  // Encrypt the AES key with RSA-OAEP
-  const encryptedAesKey = new Uint8Array(await subtle.encrypt({ name: "RSA-OAEP" }, rsaKey, rawAesKey));
+  // Payload: [0x01][keyId][iv:12][encAesKey:256][authTag:16][ciphertext]
+  const payload = Buffer.concat([
+    Buffer.from([0x01, keyId & 0xff]),
+    iv,
+    encryptedAesKey,
+    authTag,
+    ciphertext,
+  ]);
 
-  // Encrypt the password with AES-GCM; use timestamp (ASCII) as additional data
-  const enc = new TextEncoder();
-  const ciphertextWithTag = new Uint8Array(
-    await subtle.encrypt(
-      { name: "AES-GCM", iv, additionalData: enc.encode(String(timestamp)), tagLength: 128 },
-      aesKey,
-      enc.encode(password)
-    )
-  );
-  // AES-GCM output = ciphertext || 16-byte auth tag
-  const ciphertext = ciphertextWithTag.slice(0, ciphertextWithTag.length - 16);
-  const authTag    = ciphertextWithTag.slice(ciphertextWithTag.length - 16);
-
-  // Payload layout: [0x01][keyId][iv:12][encAesKey:256][authTag:16][ciphertext]
-  const payload = new Uint8Array(1 + 1 + 12 + 256 + 16 + ciphertext.length);
-  let off = 0;
-  payload[off++] = 0x01;
-  payload[off++] = keyId & 0xff;
-  payload.set(iv, off);            off += 12;
-  payload.set(encryptedAesKey, off); off += 256;
-  payload.set(authTag, off);       off += 16;
-  payload.set(ciphertext, off);
-
-  const b64 = btoa(String.fromCharCode(...payload));
-  return `#PWD_INSTAGRAM_BROWSER:10:${keyId}:${timestamp}:${b64}`;
+  return `#PWD_INSTAGRAM_BROWSER:10:${keyId}:${timestamp}:${payload.toString("base64")}`;
 }
 
 /** Parse a concatenated set-cookie header string into a name→value map. */
