@@ -1,7 +1,8 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
-import { getLoginPage, submitLogin, verify2FA, directLogin } from "./auth";
+import { getLoginPage, submitLogin, verify2FA } from "./auth";
+import { puppeteerLogin, puppeteerComplete2FA } from "./puppeteer-auth";
 import { getFeed } from "./feed";
 import { getStoriesTray, markStoriesSeen } from "./stories";
 import { getComments } from "./comments";
@@ -46,9 +47,7 @@ app.post("/api/auth/login", async (c) => {
   const { username, password } = await c.req.json<{ username: string; password: string }>();
   if (!username || !password) return c.json({ error: "Missing username or password" }, 400);
 
-  // Forward the browser's real UA so Instagram doesn't treat this as an unknown device
-  const ua = c.req.header("X-Browser-UA") ?? c.req.header("User-Agent") ?? "";
-  const result = await directLogin(username, password, ua);
+  const result = await puppeteerLogin(username, password);
 
   if (result.status === "error") return c.json({ error: result.error }, 401);
   if (result.status === "checkpoint") return c.json({ error: "checkpoint_required" }, 401);
@@ -95,7 +94,12 @@ app.post("/api/auth/2fa", async (c) => {
   }
 
   try {
-    const result = await verify2FA(username, code, twoFactorIdentifier, csrfToken, mid);
+    // twoFactorIdentifier is a UUID when using the Puppeteer flow
+    const isPuppeteerSession = /^[0-9a-f-]{36}$/i.test(twoFactorIdentifier);
+    const result = isPuppeteerSession
+      ? await puppeteerComplete2FA(twoFactorIdentifier, code)
+      : await verify2FA(username, code, twoFactorIdentifier, csrfToken, mid);
+
     if (result.dsUserId) {
       storeSession({ sessionId: result.sessionId, csrfToken: result.csrfToken, dsUserId: result.dsUserId, mid: result.mid });
     }
