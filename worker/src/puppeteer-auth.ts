@@ -188,29 +188,43 @@ export async function puppeteerComplete2FA(
 
   const { page } = session;
 
-  // Find and fill the verification code input
+  // Log inputs so we can see the real selectors
+  const inputs = await page.evaluate(() =>
+    Array.from(document.querySelectorAll("input")).map((el) => ({
+      name: el.name, type: el.type, autocomplete: el.autocomplete,
+      ariaLabel: el.getAttribute("aria-label"), id: el.id,
+    }))
+  );
+  console.log("[puppeteer:2fa] inputs:", JSON.stringify(inputs));
+
+  // Find the code input — try multiple selectors
   const input = await page.$('input[name="verificationCode"]')
     ?? await page.$('input[autocomplete="one-time-code"]')
-    ?? await page.$('input[type="number"]');
+    ?? await page.$('input[name="security_code"]')
+    ?? await page.$('input[type="tel"]')
+    ?? await page.$('input[inputmode="numeric"]');
 
-  if (!input) throw new Error("Could not find 2FA code input on page");
-
-  await input.click({ clickCount: 3 }); // clear any existing value
-  await input.type(code.replace(/\s/g, ""), { delay: 40 });
-
-  // Submit — try the confirm button, fall back to Enter
-  const btn = await page.$('button[type="submit"]') ?? await page.$("button");
-  if (btn) {
-    await btn.click();
-  } else {
-    await input.press("Enter");
+  if (!input) {
+    console.log("[puppeteer:2fa] no input found, page text:", await page.evaluate(() => document.body?.innerText?.slice(0, 300) ?? ""));
+    throw new Error("Could not find 2FA code input on page");
   }
+
+  await input.click({ clickCount: 3 });
+  await input.type(code.replace(/\s/g, ""), { delay: 40 });
+  await page.keyboard.press("Enter");
 
   await page.waitForNavigation({ waitUntil: "networkidle2", timeout: 20_000 }).catch(() => {});
 
-  const { sessionId, csrfToken, dsUserId, mid } = await extractCookies(page);
-  await closePendingSession(twoFactorIdentifier);
+  console.log("[puppeteer:2fa] post-submit URL:", page.url());
 
-  if (!sessionId) throw new Error("2FA verification failed — wrong code?");
+  const { sessionId, csrfToken, dsUserId, mid } = await extractCookies(page);
+
+  // Only close the session on success — keep it open so user can retry with correct code
+  if (!sessionId) {
+    console.log("[puppeteer:2fa] no sessionid after submit");
+    throw new Error("2FA verification failed — wrong code?");
+  }
+
+  await closePendingSession(twoFactorIdentifier);
   return { sessionId, csrfToken, dsUserId, mid };
 }
