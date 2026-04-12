@@ -226,9 +226,14 @@ export async function directLogin(
   const csrfToken = initialCookies.get("csrftoken") ?? "";
   const cookieStr = [...initialCookies.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
 
-  // Step 2 — Submit credentials to Instagram's AJAX login endpoint.
-  // enc_password version 0 = plain-text password (no RSA/AES needed).
-  const encPassword = `#PWD_INSTAGRAM_BROWSER:0:${Math.floor(Date.now() / 1000)}:${password}`;
+  // Step 2 — Encrypt password with Instagram's public key (version 10).
+  // The key config is embedded in the login page HTML.
+  const pageHtml = await pageRes.text();
+  const timestamp = Math.floor(Date.now() / 1000);
+  const encConfig = extractEncryptionConfig(pageHtml);
+  const encPassword = encConfig
+    ? await encryptPassword(password, encConfig.keyId, encConfig.publicKey, timestamp)
+    : `#PWD_INSTAGRAM_BROWSER:0:${timestamp}:${password}`; // fallback if key not found
   const body = new URLSearchParams({
     username,
     enc_password: encPassword,
@@ -267,6 +272,7 @@ export async function directLogin(
   console.log("[login] status:", loginRes.status,
     "| csrfToken from page:", csrfToken ? csrfToken.slice(0, 8) + "…" : "(MISSING)",
     "| mid from page:", initialCookies.get("mid") ? "✓" : "(MISSING)",
+    "| enc version:", encConfig ? `10 (keyId=${encConfig.keyId})` : "0 (fallback)",
     "| authenticated:", data.authenticated,
     "| two_factor_required:", data.two_factor_required,
     "| checkpoint_url:", data.checkpoint_url ?? "(none)",
@@ -308,6 +314,81 @@ export async function directLogin(
     dsUserId: parseCsrfToken(setCookie, "ds_user_id") ?? "",
     mid: initialCookies.get("mid") ?? "",
   };
+}
+
+// ---------------------------------------------------------------------------
+// Password encryption — Instagram enc_password version 10
+// RSA-OAEP (SHA-256) wraps a random AES-256-GCM key; AES-GCM encrypts the
+// password. The public key and key ID are embedded in the login page HTML.
+// ---------------------------------------------------------------------------
+
+function extractEncryptionConfig(html: string): { keyId: number; publicKey: string } | null {
+  // Instagram embeds the key config in various script tags; match key_id followed
+  // (within 300 chars) by public_key to avoid cross-field matches.
+  const m = html.match(/"key_id"\s*:\s*"?(\d+)"?.{0,300}?"public_key"\s*:\s*"((?:[^"\\]|\\.)*)"/s);
+  if (!m) return null;
+  const publicKey = m[2]
+    .replace(/\\n/g, "\n")
+    .replace(/\\\\/g, "\\")
+    .replace(/\\"/g, '"');
+  return { keyId: Number(m[1]), publicKey };
+}
+
+async function encryptPassword(
+  password: string,
+  keyId: number,
+  publicKeyPem: string,
+  timestamp: number
+): Promise<string> {
+  const subtle = globalThis.crypto.subtle;
+
+  // Import Instagram's RSA public key (SPKI/PEM)
+  const pemBody = publicKeyPem
+    .replace(/-----BEGIN PUBLIC KEY-----/, "")
+    .replace(/-----END PUBLIC KEY-----/, "")
+    .replace(/\s+/g, "");
+  const spki = Uint8Array.from(atob(pemBody), (c) => c.charCodeAt(0));
+  const rsaKey = await subtle.importKey(
+    "spki",
+    spki,
+    { name: "RSA-OAEP", hash: "SHA-256" },
+    false,
+    ["encrypt"]
+  );
+
+  // Generate a random AES-256-GCM key and IV
+  const aesKey = await subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt"]);
+  const iv = globalThis.crypto.getRandomValues(new Uint8Array(12));
+  const rawAesKey = new Uint8Array(await subtle.exportKey("raw", aesKey));
+
+  // Encrypt the AES key with RSA-OAEP
+  const encryptedAesKey = new Uint8Array(await subtle.encrypt({ name: "RSA-OAEP" }, rsaKey, rawAesKey));
+
+  // Encrypt the password with AES-GCM; use timestamp (ASCII) as additional data
+  const enc = new TextEncoder();
+  const ciphertextWithTag = new Uint8Array(
+    await subtle.encrypt(
+      { name: "AES-GCM", iv, additionalData: enc.encode(String(timestamp)), tagLength: 128 },
+      aesKey,
+      enc.encode(password)
+    )
+  );
+  // AES-GCM output = ciphertext || 16-byte auth tag
+  const ciphertext = ciphertextWithTag.slice(0, ciphertextWithTag.length - 16);
+  const authTag    = ciphertextWithTag.slice(ciphertextWithTag.length - 16);
+
+  // Payload layout: [0x01][keyId][iv:12][encAesKey:256][authTag:16][ciphertext]
+  const payload = new Uint8Array(1 + 1 + 12 + 256 + 16 + ciphertext.length);
+  let off = 0;
+  payload[off++] = 0x01;
+  payload[off++] = keyId & 0xff;
+  payload.set(iv, off);            off += 12;
+  payload.set(encryptedAesKey, off); off += 256;
+  payload.set(authTag, off);       off += 16;
+  payload.set(ciphertext, off);
+
+  const b64 = btoa(String.fromCharCode(...payload));
+  return `#PWD_INSTAGRAM_BROWSER:10:${keyId}:${timestamp}:${b64}`;
 }
 
 /** Parse a concatenated set-cookie header string into a name→value map. */
