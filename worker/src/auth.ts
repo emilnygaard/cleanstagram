@@ -264,13 +264,17 @@ export async function directLogin(
     return { status: "error", error: "Unexpected response from Instagram" };
   }
 
-  console.log("[login] status:", loginRes.status, "| authenticated:", data.authenticated,
+  console.log("[login] status:", loginRes.status,
+    "| csrfToken from page:", csrfToken ? csrfToken.slice(0, 8) + "…" : "(MISSING)",
+    "| mid from page:", initialCookies.get("mid") ? "✓" : "(MISSING)",
+    "| authenticated:", data.authenticated,
     "| two_factor_required:", data.two_factor_required,
     "| checkpoint_url:", data.checkpoint_url ?? "(none)",
     "| message:", data.message ?? "(none)",
     "| has sessionid:", !!parseCsrfToken(setCookie, "sessionid"),
     "| has ds_user_id:", !!parseCsrfToken(setCookie, "ds_user_id"),
     "| ua:", userAgent.slice(0, 60));
+  console.log("[login] full response:", JSON.stringify(data));
 
   // Instagram sometimes requires email/SMS verification after a new-device login.
   // The session is created but won't work until the checkpoint is cleared.
