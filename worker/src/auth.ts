@@ -238,6 +238,15 @@ export async function directLogin(
   const pageHtml = await pageRes.text();
   const timestamp = Math.floor(Date.now() / 1000);
   const encConfig = extractEncryptionConfig(pageHtml);
+  if (encConfig) {
+    console.log("[login] enc keyId:", encConfig.keyId);
+    console.log("[login] enc pubkey first 120:", JSON.stringify(encConfig.publicKey.slice(0, 120)));
+  } else {
+    console.log("[login] enc config NOT FOUND in page html (length:", pageHtml.length, ")");
+    // Log a snippet around where we'd expect the key
+    const idx = pageHtml.indexOf("key_id");
+    if (idx >= 0) console.log("[login] key_id context:", JSON.stringify(pageHtml.slice(idx, idx + 200)));
+  }
   const encPassword = encConfig
     ? encryptPassword(password, encConfig.keyId, encConfig.publicKey, timestamp)
     : `#PWD_INSTAGRAM_BROWSER:0:${timestamp}:${password}`; // fallback if key not found
