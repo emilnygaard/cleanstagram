@@ -133,6 +133,16 @@ export async function puppeteerLogin(
       // No cookie dialog — continue
     }
 
+    // Log all inputs to find correct selectors
+    const inputs = await page.evaluate(() =>
+      Array.from(document.querySelectorAll("input")).map((el) => ({
+        name: el.name, type: el.type, placeholder: el.placeholder,
+        autocomplete: el.autocomplete, ariaLabel: el.getAttribute("aria-label"),
+        id: el.id, className: el.className.slice(0, 60),
+      }))
+    );
+    console.log("[puppeteer] inputs found:", JSON.stringify(inputs));
+
     // Fill credentials
     await page.waitForSelector('input[name="username"]', { timeout: 10_000 });
     await page.type('input[name="username"]', username, { delay: 40 });
