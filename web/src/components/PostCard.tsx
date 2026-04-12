@@ -152,7 +152,7 @@ export function PostCard({ post, seen, session, onSeen, priority = false }: Prop
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Mark seen when card scrolls out of view
+  // Mark seen as soon as the card is visible in the viewport
   useEffect(() => {
     if (seen) return;
     const el = cardRef.current;
@@ -160,9 +160,9 @@ export function PostCard({ post, seen, session, onSeen, priority = false }: Prop
 
     const observer = new IntersectionObserver(
       (entries) => {
-        if (!entries[0].isIntersecting) onSeen(post.id);
+        if (entries[0].isIntersecting) onSeen(post.id);
       },
-      { threshold: 0 }
+      { threshold: 0.2 }
     );
     observer.observe(el);
     return () => observer.disconnect();

@@ -29,8 +29,17 @@ function mergePosts(a: FeedPost[], b: FeedPost[]): FeedPost[] {
   return Array.from(map.values()).sort((x, y) => y.timestamp - x.timestamp);
 }
 
-// Pull-to-refresh threshold in pixels
-const PULL_THRESHOLD = 64;
+function CacheAge({ cachedAt }: { cachedAt: number }) {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 60_000);
+    return () => clearInterval(id);
+  }, []);
+  const mins = Math.round((Date.now() - cachedAt) / 60_000);
+  if (mins < 1) return <span>just now</span>;
+  if (mins === 1) return <span>1 min ago</span>;
+  return <span>{mins} min ago</span>;
+}
 
 export function FeedPage({ session, sessionCode, onLogout }: Props) {
   const [posts, setPosts] = useState<FeedPost[]>([]);
@@ -40,6 +49,7 @@ export function FeedPage({ session, sessionCode, onLogout }: Props) {
   const [error, setError] = useState<string | null>(null);
   const loaderRef = useRef<HTMLDivElement>(null);
   const loadingRef = useRef(false);
+
 
   const [seenPostIds, setSeenPostIds] = useState<Set<string>>(() => loadSeenPosts());
   // Snapshot of seen IDs at page load — used to split new vs old posts.
@@ -52,10 +62,7 @@ export function FeedPage({ session, sessionCode, onLogout }: Props) {
   const [seenStories, setSeenStories] = useState<SeenStories>(() => loadSeenStories());
   const [showOlderPosts, setShowOlderPosts] = useState(false);
 
-  // Pull-to-refresh state
-  const [pullY, setPullY] = useState(0);
-  const [pulling, setPulling] = useState(false);
-  const touchStartY = useRef(0);
+  const [cachedAt, setCachedAt] = useState<number | null>(null);
 
   // Online/offline
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
@@ -94,19 +101,20 @@ export function FeedPage({ session, sessionCode, onLogout }: Props) {
   // Feed loading
   // -------------------------------------------------------------------------
   const loadFeed = useCallback(
-    async (maxId?: string, noCache = false) => {
+    async (maxId?: string) => {
       if (loadingRef.current) return;
       loadingRef.current = true;
       setLoading(true);
       setError(null);
       try {
-        const data = await apiFeed(session, maxId, noCache);
+        const data = await apiFeed(session, maxId);
         setPosts((prev) => {
           const merged = mergePosts(prev, data.posts);
           saveFeedCache(merged);
           return merged;
         });
         setNextMaxId(data.nextMaxId);
+        if (data.cachedAt) setCachedAt(data.cachedAt);
       } catch (err) {
         if (err instanceof Error && err.message === "UNAUTHORIZED") {
           setError("SESSION_EXPIRED");
@@ -121,19 +129,19 @@ export function FeedPage({ session, sessionCode, onLogout }: Props) {
     [session]
   );
 
-  const refreshFeed = useCallback(async (noCache = false) => {
+  const refreshFeed = useCallback(async () => {
     if (loadingRef.current) return;
-    await loadFeed(undefined, noCache);
+    await loadFeed();
   }, [loadFeed]);
 
   // -------------------------------------------------------------------------
-  // On mount: show cache immediately, then bulk-fetch fresh posts
+  // On mount: show cache immediately, then fetch one fresh page from the Pi
+  // (page 1 is always warm in the Pi's cache — further pages load via scroll)
   // -------------------------------------------------------------------------
   useEffect(() => {
     let cancelled = false;
-    const MAX_PAGES = 4;
 
-    async function bulkLoad() {
+    async function initialLoad() {
       const cache = loadFeedCache();
       if (cache && cache.posts.length > 0) {
         setPosts(cache.posts);
@@ -144,28 +152,17 @@ export function FeedPage({ session, sessionCode, onLogout }: Props) {
       loadingRef.current = true;
       setError(null);
 
-      const accumulated: FeedPost[] = [];
-      let cursor: string | undefined = undefined;
-
       try {
-        for (let page = 0; page < MAX_PAGES; page++) {
-          const data = await apiFeed(session, cursor);
-          if (cancelled) return;
+        const data = await apiFeed(session);
+        if (cancelled) return;
 
-          accumulated.push(...data.posts);
-
-          setPosts((prev) => {
-            const merged = mergePosts(prev, accumulated);
-            if (page === MAX_PAGES - 1 || !data.nextMaxId) saveFeedCache(merged);
-            return merged;
-          });
-
-          if (page === 0) setInitialLoading(false);
-
-          if (!data.nextMaxId) { setNextMaxId(null); break; }
-          cursor = data.nextMaxId;
-          setNextMaxId(cursor);
-        }
+        setPosts((prev) => {
+          const merged = mergePosts(prev, data.posts);
+          saveFeedCache(merged);
+          return merged;
+        });
+        setNextMaxId(data.nextMaxId);
+        if (data.cachedAt) setCachedAt(data.cachedAt);
       } catch (err) {
         if (cancelled) return;
         if (err instanceof Error && err.message === "UNAUTHORIZED") { setError("SESSION_EXPIRED"); return; }
@@ -179,7 +176,7 @@ export function FeedPage({ session, sessionCode, onLogout }: Props) {
       }
     }
 
-    bulkLoad();
+    initialLoad();
     apiStories(session)
       .then((data) => { if (!cancelled) setStories(data.stories); })
       .catch((err) => console.warn("[stories]", err))
@@ -199,9 +196,7 @@ export function FeedPage({ session, sessionCode, onLogout }: Props) {
       if (idleMs > 5 * 60 * 1000) {
         lastFocusLoad.current = Date.now();
         void refreshFeed();
-        apiStories(session)
-          .then((data) => setStories(data.stories))
-          .catch(() => {});
+        apiStories(session).then((data) => setStories(data.stories)).catch(() => {});
       }
     };
     window.addEventListener("focus", onFocus);
@@ -227,34 +222,6 @@ export function FeedPage({ session, sessionCode, onLogout }: Props) {
     observer.observe(el);
     return () => observer.disconnect();
   }, [loadFeed, nextMaxId, loading]);
-
-  // -------------------------------------------------------------------------
-  // Pull-to-refresh touch handlers
-  // -------------------------------------------------------------------------
-  const handleTouchStart = useCallback((e: React.TouchEvent) => {
-    if (window.scrollY === 0) {
-      touchStartY.current = e.touches[0].clientY;
-    }
-  }, []);
-
-  const handleTouchMove = useCallback((e: React.TouchEvent) => {
-    if (window.scrollY > 0 || loadingRef.current) return;
-    const dy = e.touches[0].clientY - touchStartY.current;
-    if (dy > 0) {
-      setPullY(Math.min(dy * 0.5, PULL_THRESHOLD + 20));
-      setPulling(dy > PULL_THRESHOLD * 2);
-    }
-  }, []);
-
-  const handleTouchEnd = useCallback(() => {
-    if (pulling) {
-      // Pull-to-refresh bypasses cache — user explicitly wants fresh data
-      void refreshFeed(true);
-      apiStories(session, true).then(d => setStories(d.stories)).catch(() => {});
-    }
-    setPullY(0);
-    setPulling(false);
-  }, [pulling, refreshFeed, session]);
 
   // -------------------------------------------------------------------------
   // Render
@@ -284,12 +251,7 @@ export function FeedPage({ session, sessionCode, onLogout }: Props) {
   const trulyEmpty = !initialLoading && !loading && !error && posts.length === 0;
 
   return (
-    <div
-      className="min-h-screen bg-gray-50"
-      onTouchStart={handleTouchStart}
-      onTouchMove={handleTouchMove}
-      onTouchEnd={handleTouchEnd}
-    >
+    <div className="min-h-screen bg-gray-50">
       {/* Background-refresh loading bar (not shown during initial skeleton load) */}
       <LoadingBar loading={loading && !initialLoading} />
 
@@ -300,36 +262,16 @@ export function FeedPage({ session, sessionCode, onLogout }: Props) {
         </div>
       )}
 
-      {/* Pull-to-refresh indicator */}
-      {pullY > 0 && (
-        <div
-          className="flex items-center justify-center overflow-hidden transition-none"
-          style={{ height: pullY }}
-        >
-          <div
-            className={`transition-all duration-150 ${pulling ? "opacity-100 scale-100" : "opacity-50 scale-75"}`}
-          >
-            <svg
-              viewBox="0 0 24 24"
-              className={`w-6 h-6 text-gray-600 ${pulling ? "animate-spin" : ""}`}
-              style={pulling ? {} : { transform: `rotate(${Math.min(pullY * 4, 360)}deg)` }}
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-            >
-              <path d="M12 2v4M12 2l-2 2M12 2l2 2" />
-              <path d="M20.66 7A10 10 0 1 1 3.34 17" opacity=".4" />
-            </svg>
-          </div>
-        </div>
-      )}
-
       {/* Top bar */}
       <header className="sticky top-0 z-10 bg-white/95 backdrop-blur border-b border-gray-100 px-4 py-3 flex items-center justify-between">
-        <h1 className="text-base font-semibold tracking-tight text-gray-900">
-          cleanstagram
-        </h1>
+        <div>
+          <h1 className="text-base font-semibold tracking-tight text-gray-900">cleanstagram</h1>
+          {cachedAt && (
+            <p className="text-[10px] text-gray-400 leading-none mt-0.5">
+              Updated <CacheAge cachedAt={cachedAt} />
+            </p>
+          )}
+        </div>
         <div className="flex items-center gap-3">
           <button
             onClick={() => setShowSessionCode((v) => !v)}

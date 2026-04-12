@@ -137,14 +137,14 @@ app.get("/api/feed", async (c) => {
           .catch(() => {});
       }
       console.log(`[feed] served from cache (age ${Math.round(age / 1000)}s)`);
-      return c.json(cached.data);
+      return c.json({ ...cached.data, cachedAt: cached.fetchedAt });
     }
   }
 
   try {
     const feed = await getFeed(sessionId, csrfToken, maxId, dsUserId, mid);
     if (!maxId && dsUserId) writeCache(dsUserId, "feed", feed);
-    return c.json(feed);
+    return c.json({ ...feed, cachedAt: Date.now() });
   } catch (err) {
     if (err instanceof Error && err.message === "UNAUTHORIZED") {
       return c.json({ error: "Session expired — please log in again" }, 401);

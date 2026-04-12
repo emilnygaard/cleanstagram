@@ -87,6 +87,7 @@ export async function apiComments(
 export interface FeedResponse {
   posts: FeedPost[];
   nextMaxId: string | null;
+  cachedAt?: number; // unix ms — when the Pi last fetched from Instagram
 }
 
 // ---------------------------------------------------------------------------
