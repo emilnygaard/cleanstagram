@@ -230,6 +230,7 @@ export async function directLogin(
 
   // Collect ALL cookies set by the page (csrftoken, mid, ig_did, …)
   const pageCookieHeader = pageRes.headers.get("set-cookie") ?? "";
+  console.log("[login] raw set-cookie from page:", pageCookieHeader.slice(0, 300));
   const initialCookies = parseCookieMap(pageCookieHeader);
   const csrfToken = initialCookies.get("csrftoken") ?? "";
   const cookieStr = [...initialCookies.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
@@ -251,11 +252,17 @@ export async function directLogin(
   const encPassword = encConfig
     ? encryptPassword(password, encConfig.keyId, encConfig.publicKey, timestamp)
     : `#PWD_INSTAGRAM_BROWSER:0:${timestamp}:${password}`; // fallback if key not found
+
+  // jazoest = "2" + sum of char codes of csrfToken — Instagram's JS adds this to the form
+  const jazoest = "2" + csrfToken.split("").reduce((s, c) => s + c.charCodeAt(0), 0).toString();
+
   const body = new URLSearchParams({
     username,
     enc_password: encPassword,
     queryParams: "{}",
     optIntoOneTap: "false",
+    trustedDeviceRecords: "{}",
+    jazoest,
   });
 
   const loginRes = await fetch(`${IG_BASE}/accounts/login/ajax/`, {
