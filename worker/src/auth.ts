@@ -251,21 +251,58 @@ export async function directLogin(
   }
   const encPassword = encConfig
     ? encryptPassword(password, encConfig.keyId, encConfig.publicKey, timestamp)
-    : `#PWD_INSTAGRAM_BROWSER:0:${timestamp}:${password}`; // fallback if key not found
+    : `#PWD_BROWSER:0:${timestamp}:${password}`; // fallback if key not found
 
-  // jazoest = "2" + sum of char codes of csrfToken — Instagram's JS adds this to the form
-  const jazoest = "2" + csrfToken.split("").reduce((s, c) => s + c.charCodeAt(0), 0).toString();
+  // Generate a stable-ish device ID for this login attempt
+  const igWebDeviceId = generateUUID();
 
-  const body = new URLSearchParams({
-    username,
-    enc_password: encPassword,
-    queryParams: "{}",
-    optIntoOneTap: "false",
-    trustedDeviceRecords: "{}",
-    jazoest,
+  // Instagram now uses a GraphQL/Relay mutation for login
+  const variables = JSON.stringify({
+    input: {
+      actor_id: "0",
+      client_mutation_id: "1",
+      access_flow_version: "pre_mt_behavior",
+      app: "instagram",
+      auth_domain_data_key: null,
+      caa_login_request_extra_info: {
+        ab_test_data: "", shared_prefs_data: "", cuid: "", guid: "",
+        jazoest: "", lgndim: "", lgnjs: String(timestamp),
+        lgnrnd: "", locale: "", login_source: "caa_login",
+        lsd: "", next: "", prefill_contact_point: "",
+        prefill_source: "", prefill_type: "", skstamp: "", timezone: "",
+      },
+      credential_type: "password",
+      dyi_job_id: "",
+      enc_password: { sensitive_string_value: encPassword },
+      event_request_id: generateUUID(),
+      identifier: username,
+      ig_web_device_id: igWebDeviceId,
+      initial_request_id: "1",
+      lids: null,
+      login_source: "COMET_HEADERLESS_LOGIN",
+      next: null,
+      passkey_payload: null,
+      password: { sensitive_string_value: encPassword },
+    },
   });
 
-  const loginRes = await fetch(`${IG_BASE}/accounts/login/ajax/`, {
+  const body = new URLSearchParams({
+    av: "0",
+    __d: "www",
+    __user: "0",
+    __a: "1",
+    __req: "e",
+    dpr: "2",
+    __ccg: "EXCELLENT",
+    lsd: csrfToken, // reuse csrf as lsd — Instagram validates this loosely
+    jazoest: "2" + csrfToken.split("").reduce((s, c) => s + c.charCodeAt(0), 0).toString(),
+    server_timestamps: "true",
+    fb_api_caller_class: "RelayModern",
+    fb_api_req_friendly_name: "useCDSWebLoginMutation",
+    variables,
+  });
+
+  const loginRes = await fetch(`${IG_BASE}/api/graphql`, {
     method: "POST",
     headers: {
       "User-Agent": userAgent,
@@ -273,9 +310,10 @@ export async function directLogin(
       "X-CSRFToken": csrfToken,
       "X-Requested-With": "XMLHttpRequest",
       "X-IG-App-ID": "936619743392459",
+      "X-FB-LSD": csrfToken,
       Referer: `${IG_BASE}/accounts/login/`,
       Origin: IG_BASE,
-      Cookie: cookieStr,           // include mid + all initial cookies
+      Cookie: cookieStr,
     },
     body: body.toString(),
     redirect: "manual",
@@ -286,12 +324,26 @@ export async function directLogin(
   }
 
   const setCookie = loginRes.headers.get("set-cookie") ?? "";
-  let data: Record<string, unknown>;
+  let raw: Record<string, unknown>;
   try {
-    data = (await loginRes.json()) as Record<string, unknown>;
+    raw = (await loginRes.json()) as Record<string, unknown>;
   } catch {
     return { status: "error", error: "Unexpected response from Instagram" };
   }
+
+  // GraphQL response nests the result under data.useCDSWebLoginMutation
+  const mutationResult = (
+    (raw.data as Record<string, unknown>)?.useCDSWebLoginMutation as Record<string, unknown>
+  ) ?? raw;
+  const loginData = (mutationResult.login_response as Record<string, unknown>) ?? mutationResult;
+  // Flatten for the existing logging/parsing code below
+  const data: Record<string, unknown> = {
+    ...loginData,
+    // Also check top-level fields for compatibility with old-style responses
+    authenticated: loginData.authenticated ?? (mutationResult.status === "ok" ? true : undefined),
+    status: mutationResult.status ?? raw.status,
+    message: loginData.message ?? mutationResult.message ?? raw.message,
+  };
 
   console.log("[login] status:", loginRes.status,
     "| csrfToken from page:", csrfToken ? csrfToken.slice(0, 8) + "…" : "(MISSING)",
@@ -304,7 +356,8 @@ export async function directLogin(
     "| has sessionid:", !!parseCsrfToken(setCookie, "sessionid"),
     "| has ds_user_id:", !!parseCsrfToken(setCookie, "ds_user_id"),
     "| ua:", userAgent.slice(0, 60));
-  console.log("[login] full response:", JSON.stringify(data));
+  console.log("[login] raw graphql response:", JSON.stringify(raw).slice(0, 500));
+  console.log("[login] parsed data:", JSON.stringify(data));
 
   // Instagram sometimes requires email/SMS verification after a new-device login.
   // The session is created but won't work until the checkpoint is cleared.
@@ -400,7 +453,14 @@ function encryptPassword(
     authTag,
   ]);
 
-  return `#PWD_INSTAGRAM_BROWSER:10:${keyId}:${timestamp}:${payload.toString("base64")}`;
+  return `#PWD_BROWSER:10:${timestamp}:${payload.toString("base64")}`;
+}
+
+function generateUUID(): string {
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
+  });
 }
 
 /** Parse a concatenated set-cookie header string into a name→value map. */
