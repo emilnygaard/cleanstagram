@@ -98,6 +98,11 @@ export async function puppeteerLogin(
       timeout: 30_000,
     });
 
+    console.log("[puppeteer] URL after load:", page.url());
+    await page.screenshot({ path: "/tmp/ig-pre-cookie.png" });
+    const pageText = await page.evaluate(() => document.body?.innerText ?? "").catch(() => "");
+    console.log("[puppeteer] page text (first 400):", pageText.slice(0, 400));
+
     // Dismiss cookie consent dialog if present (text varies by locale)
     try {
       const cookieBtnSelectors = [
