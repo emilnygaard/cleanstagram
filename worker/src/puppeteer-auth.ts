@@ -98,6 +98,36 @@ export async function puppeteerLogin(
       timeout: 30_000,
     });
 
+    // Dismiss cookie consent dialog if present (text varies by locale)
+    try {
+      const cookieBtnSelectors = [
+        // Reject optional / necessary only
+        'button[data-cookiebanner="accept_only_essential_button"]',
+        'button[data-testid="cookie-policy-manage-dialog-accept-button"]',
+      ];
+      for (const sel of cookieBtnSelectors) {
+        const btn = await page.$(sel);
+        if (btn) { await btn.click(); break; }
+      }
+      // Fallback: find by text content
+      if (!await page.$('input[name="username"]')) {
+        await page.evaluate(() => {
+          const buttons = Array.from(document.querySelectorAll("button"));
+          // Prefer "reject" / "necessary only" over "accept all"
+          const reject = buttons.find((b) =>
+            /afvis|reject|necessary|decline|refuse/i.test(b.textContent ?? "")
+          );
+          const accept = buttons.find((b) =>
+            /tillad alle|allow all|accept all/i.test(b.textContent ?? "")
+          );
+          (reject ?? accept)?.click();
+        });
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+    } catch {
+      // No cookie dialog — continue
+    }
+
     // Fill credentials
     await page.waitForSelector('input[name="username"]', { timeout: 10_000 });
     await page.type('input[name="username"]', username, { delay: 40 });
