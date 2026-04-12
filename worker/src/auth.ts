@@ -379,19 +379,18 @@ function encryptPassword(
   // Random 12-byte IV
   const iv = randomBytes(12);
 
-  // AES-256-GCM encrypt; timestamp string is the additional data
+  // AES-256-GCM encrypt (no additional data)
   const cipher = createCipheriv("aes-256-gcm", aesKey, iv);
-  cipher.setAAD(Buffer.from(String(timestamp)));
   const ciphertext = Buffer.concat([cipher.update(password, "utf8"), cipher.final()]);
   const authTag    = cipher.getAuthTag(); // 16 bytes
 
-  // Payload: [0x01][keyId:1][iv:12][ephemeralPub:32][authTag:16][ciphertext]
+  // Payload: [0x01][keyId:1][iv:12][ephemeralPub:32][ciphertext][authTag:16]
   const payload = Buffer.concat([
     Buffer.from([0x01, keyId & 0xff]),
     iv,
     ephemeralPubBytes,
-    authTag,
     ciphertext,
+    authTag,
   ]);
 
   return `#PWD_INSTAGRAM_BROWSER:10:${keyId}:${timestamp}:${payload.toString("base64")}`;
