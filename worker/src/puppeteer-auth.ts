@@ -137,7 +137,7 @@ export async function puppeteerLogin(
     await page.waitForSelector('input[name="email"]', { timeout: 10_000 });
     await page.type('input[name="email"]', username, { delay: 40 });
     await page.type('input[name="pass"]', password, { delay: 40 });
-    await page.click('input[type="submit"]');
+    await page.keyboard.press("Enter");
 
     // Wait for Instagram to respond — either redirect, 2FA, or checkpoint
     await page.waitForNavigation({ waitUntil: "networkidle2", timeout: 20_000 }).catch(() => {});
