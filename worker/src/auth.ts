@@ -1,8 +1,9 @@
 import {
-  publicEncrypt,
+  createPublicKey,
+  generateKeyPairSync,
+  diffieHellman,
   randomBytes,
   createCipheriv,
-  constants as cryptoConstants,
 } from "node:crypto";
 
 // ---------------------------------------------------------------------------
@@ -344,40 +345,51 @@ function extractEncryptionConfig(html: string): { keyId: number; publicKey: stri
   // (within 300 chars) by public_key to avoid cross-field matches.
   const m = html.match(/"key_id"\s*:\s*"?(\d+)"?.{0,300}?"public_key"\s*:\s*"((?:[^"\\]|\\.)*)"/s);
   if (!m) return null;
-  const publicKey = m[2]
-    .replace(/\\n/g, "\n")
-    .replace(/\\\\/g, "\\")
-    .replace(/\\"/g, '"');
-  return { keyId: Number(m[1]), publicKey };
+  // publicKey is now a raw hex string (X25519), no PEM unescaping needed
+  return { keyId: Number(m[1]), publicKey: m[2] };
 }
 
 function encryptPassword(
   password: string,
   keyId: number,
-  publicKeyPem: string,
+  publicKeyHex: string,
   timestamp: number
 ): string {
-  // Random AES-256 key + 12-byte IV
-  const aesKey = randomBytes(32);
-  const iv     = randomBytes(12);
+  // Instagram's public key is a raw 32-byte X25519 key (hex-encoded).
+  // Wrap it in SPKI DER so Node.js can import it.
+  const serverKeyBytes = Buffer.from(publicKeyHex, "hex");
+  // X25519 SPKI DER prefix: SEQUENCE { AlgorithmIdentifier { OID 1.3.101.110 } BIT STRING }
+  const spkiPrefix = Buffer.from("302a300506032b656e032100", "hex");
+  const serverPublicKey = createPublicKey({
+    key: Buffer.concat([spkiPrefix, serverKeyBytes]),
+    format: "der",
+    type: "spki",
+  });
 
-  // RSA-OAEP SHA-256 encrypt the AES key with Instagram's public key
-  const encryptedAesKey = publicEncrypt(
-    { key: publicKeyPem, oaepHash: "sha256", padding: cryptoConstants.RSA_PKCS1_OAEP_PADDING },
-    aesKey
-  );
+  // Generate ephemeral X25519 keypair
+  const { publicKey: ephemeralPub, privateKey: ephemeralPriv } =
+    generateKeyPairSync("x25519");
 
-  // AES-256-GCM encrypt the password; timestamp string is the additional data
+  // X25519 shared secret — used directly as the AES-256 key
+  const aesKey = diffieHellman({ privateKey: ephemeralPriv, publicKey: serverPublicKey });
+
+  // Ephemeral public key as raw 32 bytes (strip the 12-byte SPKI header)
+  const ephemeralPubBytes = (ephemeralPub.export({ type: "spki", format: "der" }) as Buffer).slice(-32);
+
+  // Random 12-byte IV
+  const iv = randomBytes(12);
+
+  // AES-256-GCM encrypt; timestamp string is the additional data
   const cipher = createCipheriv("aes-256-gcm", aesKey, iv);
   cipher.setAAD(Buffer.from(String(timestamp)));
   const ciphertext = Buffer.concat([cipher.update(password, "utf8"), cipher.final()]);
   const authTag    = cipher.getAuthTag(); // 16 bytes
 
-  // Payload: [0x01][keyId][iv:12][encAesKey:256][authTag:16][ciphertext]
+  // Payload: [0x01][keyId:1][iv:12][ephemeralPub:32][authTag:16][ciphertext]
   const payload = Buffer.concat([
     Buffer.from([0x01, keyId & 0xff]),
     iv,
-    encryptedAesKey,
+    ephemeralPubBytes,
     authTag,
     ciphertext,
   ]);
